@@ -1,0 +1,6 @@
+# Mimosa 安全扫描输出目录
+.mimosa/
+
+# Python 字节码缓存
+__pycache__/
+*.pyc
