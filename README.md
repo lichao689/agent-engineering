@@ -41,6 +41,7 @@ gstack 安装需要 Git、Bun 和网络。安装器按仓库锁定的上游 comm
 - [`rules-curator`](./skills/workflow/rules-curator/SKILL.md)：在写入根级 agent 规则文件前，整理和判断哪些规则值得长期保留。
 - [`setup`](./skills/setup/SKILL.md)：安装、检查和修复这个技能包在 Codex 与 Claude Code 中的配置。
 - [`autoreview`](./skills/external/autoreview/SKILL.md)：来自 [`openclaw/agent-skills`](https://github.com/openclaw/agent-skills/tree/main/skills/autoreview) 的提交前结构化代码审查技能。
+- [`browser-harness`](./skills/external/browser-harness/SKILL.md)：来自 [`browser-use/browser-harness`](https://github.com/browser-use/browser-harness) 的浏览器自动化技能，通过 CDP 直接控制本地 Chrome。快照只包含技能文档；使用前需一次性安装 `browser-harness` CLI（见上游 [install.md](https://github.com/browser-use/browser-harness/blob/main/install.md)）。
 
 ### gstack 精选技能
 
@@ -63,3 +64,5 @@ gstack 安装需要 Git、Bun 和网络。安装器按仓库锁定的上游 comm
 `autoreview` 每天由 GitHub Actions 检查一次上游更新。检测到变化后，工作流会同步完整技能目录、上游许可证和目录 tree 哈希，更新专用分支 `automation/sync-autoreview`，并自动创建或刷新合并到 `main` 的 PR。也可以在 Actions 页面手动运行 `Sync autoreview skill`。
 
 gstack 精选技能也每天检查一次。上游根目录 `VERSION` 变化时，`Sync curated gstack skills` 会重新生成两种宿主快照，更新 `automation/sync-gstack` 并创建或刷新 PR；工作流不会自动合并。上游同版本内发生变化时，可以手动运行工作流并勾选 `force`。同步 PR 由 GitHub Actions 和临时 `GITHUB_TOKEN` 创建，不消耗 Codex 或 Claude 模型额度。
+
+`browser-harness` 同样每天检查一次。上游根目录 `SKILL.md` 或 `LICENSE` 变化时，`Sync browser-harness skill` 会同步字节一致的上游 blob 和 `.upstream-tree` 哈希，更新 `automation/sync-browser-harness` 并创建或刷新 PR；工作流不会自动合并，也可以在 Actions 页面手动运行。同步与本地安装的 CLI 版本无关，始终直接取自 GitHub 上游。

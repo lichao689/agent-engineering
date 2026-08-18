@@ -1,0 +1,79 @@
+name: Sync browser-harness skill
+
+on:
+  schedule:
+    - cron: "53 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-browser-harness
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Fetch upstream skill
+        env:
+          UPSTREAM_REPOSITORY: https://github.com/browser-use/browser-harness.git
+        run: |
+          upstream="$RUNNER_TEMP/browser-use-browser-harness"
+          git clone --depth 1 --filter=blob:none --sparse "$UPSTREAM_REPOSITORY" "$upstream"
+
+          # The skill body and license live at the upstream repo root. Extract
+          # blobs directly with `git show` so the copy is byte-identical to the
+          # upstream objects and immune to any checkout eol/filters.
+          mkdir -p skills/external/browser-harness
+          git -C "$upstream" show HEAD:SKILL.md > skills/external/browser-harness/SKILL.md
+          git -C "$upstream" show HEAD:LICENSE > skills/external/browser-harness/LICENSE.upstream
+          git -C "$upstream" ls-tree HEAD SKILL.md LICENSE > skills/external/browser-harness/.upstream-tree
+
+      - name: Commit upstream changes
+        id: changes
+        run: |
+          git add --all -- skills/external/browser-harness
+          if git diff --cached --quiet -- skills/external/browser-harness; then
+            echo "browser-harness is already up to date"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          upstream_tree=$(awk '$NF == "SKILL.md" {print $3}' skills/external/browser-harness/.upstream-tree)
+          branch="automation/sync-browser-harness"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -m "chore(browser-harness): sync upstream skill blob ${upstream_tree:0:12}"
+          remote_sha=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)
+          if [ -n "$remote_sha" ]; then
+            git push --force-with-lease="refs/heads/$branch:$remote_sha" origin "HEAD:refs/heads/$branch"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="automation/sync-browser-harness"
+          open_prs=$(gh pr list --base main --head "$branch" --state open --json number --jq length)
+          if [ "$open_prs" -eq 0 ]; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(browser-harness): sync upstream skill" \
+              --body "Automated sync from \`browser-use/browser-harness\`, including the root \`SKILL.md\` and upstream MIT license (byte-identical blobs, tracked in \`.upstream-tree\`)."
+          else
+            echo "existing browser-harness sync PR updated"
+          fi
