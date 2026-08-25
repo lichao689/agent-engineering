@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Review"
+  short_description: "Read-only native Codex review of git changes"
+  default_prompt: "Use $codex-review to have Codex review the current uncommitted changes."

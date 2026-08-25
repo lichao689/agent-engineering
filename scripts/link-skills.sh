@@ -115,6 +115,11 @@ install_into_dest() {
         ;;
     esac
   done
+
+  if [ -f "$REPO/scripts/codex-cli-windows.ps1" ]; then
+    cp "$REPO/scripts/codex-cli-windows.ps1" "$dest/codex-cli-windows.ps1"
+    echo "copied codex-cli-windows.ps1 -> $dest"
+  fi
 }
 
 default_strategy_for_target() {
