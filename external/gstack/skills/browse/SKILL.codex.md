@@ -73,6 +73,8 @@ if [ "$_EXPLAIN_LEVEL" != "default" ] && [ "$_EXPLAIN_LEVEL" != "terse" ]; then 
 echo "EXPLAIN_LEVEL: $_EXPLAIN_LEVEL"
 _QUESTION_TUNING=$($GSTACK_BIN/gstack-config get question_tuning 2>/dev/null || echo "false")
 echo "QUESTION_TUNING: $_QUESTION_TUNING"
+_UPDATE_CHECK=$($GSTACK_BIN/gstack-config get update_check 2>/dev/null || echo "true")
+echo "UPDATE_CHECK: $_UPDATE_CHECK"
 mkdir -p ~/.gstack/analytics
 if [ "$_TEL" != "off" ]; then
 echo '{"skill":"browse","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","repo":"'$(_repo=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null | tr -cd 'a-zA-Z0-9._-'); echo "${_repo:-unknown}")'"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
@@ -99,9 +101,11 @@ else
 fi
 $GSTACK_BIN/gstack-timeline-log '{"skill":"browse","event":"started","branch":"'"$_BRANCH"'","session":"'"$_SESSION_ID"'"}' 2>/dev/null &
 _HAS_ROUTING="no"
-if [ -f CLAUDE.md ] && grep -q "## Skill routing" CLAUDE.md 2>/dev/null; then
-  _HAS_ROUTING="yes"
-fi
+for _RF in AGENTS.md AGENTS.md; do
+  if [ -f "$_RF" ] && grep -q "## Skill routing" "$_RF" 2>/dev/null; then
+    _HAS_ROUTING="yes"
+  fi
+done
 _ROUTING_DECLINED=$($GSTACK_BIN/gstack-config get routing_declined 2>/dev/null || echo "false")
 echo "HAS_ROUTING: $_HAS_ROUTING"
 echo "ROUTING_DECLINED: $_ROUTING_DECLINED"
@@ -112,7 +116,7 @@ if [ -d ".agents/skills/gstack" ] && [ ! -L ".agents/skills/gstack" ]; then
   fi
 fi
 echo "VENDORED_GSTACK: $_VENDORED"
-echo "MODEL_OVERLAY: claude"
+echo "MODEL_OVERLAY: gpt"
 _CHECKPOINT_MODE=$($GSTACK_BIN/gstack-config get checkpoint_mode 2>/dev/null || echo "explicit")
 _CHECKPOINT_PUSH=$($GSTACK_BIN/gstack-config get checkpoint_push 2>/dev/null || echo "false")
 echo "CHECKPOINT_MODE: $_CHECKPOINT_MODE"
@@ -139,11 +143,13 @@ In plan mode, allowed because they inform the plan: `$B`, `$D`, `codex exec`/`co
 
 ## Skill Invocation During Plan Mode
 
-If the user invokes a skill in plan mode, the skill takes precedence over generic plan mode behavior. **Treat the skill file as executable instructions, not reference.** Follow it step by step starting from Step 0; the first AskUserQuestion is the workflow entering plan mode, not a violation of it. AskUserQuestion (any variant — `mcp__*__AskUserQuestion` or native; see "AskUserQuestion Format → Tool resolution") satisfies plan mode's end-of-turn requirement. If AskUserQuestion is unavailable or a call fails, follow the AskUserQuestion Format failure fallback: `headless` → BLOCKED; `interactive` → the prose fallback (also satisfies end-of-turn). At a STOP point, stop immediately. Do not continue the workflow or call ExitPlanMode there. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" execute. Call ExitPlanMode only after the skill workflow completes, or if the user tells you to cancel the skill or leave plan mode.
+If the user invokes a skill in plan mode, the skill takes precedence over generic plan mode behavior. **Treat the skill file as executable instructions, not reference.** Follow it step by step starting from Step 0; any AskUserQuestion the skill fires is the workflow operating within plan mode, not a violation of it — and a skill whose instructions resolve a question themselves (e.g. a plan-mode auto-select) may legitimately not ask it. AskUserQuestion (any variant — `mcp__*__AskUserQuestion` or native; see "AskUserQuestion Format → Tool resolution") satisfies plan mode's end-of-turn requirement. If AskUserQuestion is unavailable or a call fails, follow the AskUserQuestion Format failure fallback: `headless` → BLOCKED; `interactive` → the prose fallback (also satisfies end-of-turn). At a STOP point, stop immediately. Do not continue the workflow or call ExitPlanMode there. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" execute. Call ExitPlanMode only after the skill workflow completes, or if the user tells you to cancel the skill or leave plan mode.
 
 If `PROACTIVE` is `"false"`, do not auto-invoke or proactively suggest skills. If a skill seems useful, ask: "I think /skillname might help here — want me to run it?"
 
 If `SKILL_PREFIX` is `"true"`, suggest/invoke `/gstack-*` names. Disk paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
+
+If `UPDATE_CHECK` is `"false"`, skip the next two lines — the update-check binary emits nothing in that mode, so there is no `UPGRADE_AVAILABLE` / `JUST_UPGRADED` output to act on.
 
 
 
@@ -246,17 +252,17 @@ Then run `touch ~/.gstack/.first-loop-tip-shown 2>/dev/null || true`.
 Skip this section if `ACTIVATED` and `FIRST_LOOP_SHOWN` are both `yes`.
 
 If `HAS_ROUTING` is `no` AND `ROUTING_DECLINED` is `false` AND `PROACTIVE_PROMPTED` is `yes`:
-Check if a CLAUDE.md file exists in the project root. If it does not exist, create it.
+Check if a AGENTS.md file exists in the project root. If it does not exist, create it.
 
 Use AskUserQuestion:
 
-> gstack works best when your project's CLAUDE.md includes skill routing rules.
+> gstack works best when your project's AGENTS.md includes skill routing rules.
 
 Options:
-- A) Add routing rules to CLAUDE.md (recommended)
+- A) Add routing rules to AGENTS.md (recommended)
 - B) No thanks, I'll invoke skills manually
 
-If A: Append this section to the end of CLAUDE.md:
+If A: Append this section to the end of AGENTS.md:
 
 ```markdown
 
@@ -280,7 +286,7 @@ Key routing rules:
 - Author a backlog-ready spec/issue → invoke /spec
 ```
 
-Then commit the change: `git add CLAUDE.md && git commit -m "chore: add gstack skill routing rules to CLAUDE.md"`
+Then commit the change: `git add AGENTS.md && git commit -m "chore: add gstack skill routing rules to AGENTS.md"`
 
 If B: run `$GSTACK_BIN/gstack-config set routing_declined true` and say they can re-enable with `gstack-config set routing_declined false`.
 
@@ -299,7 +305,7 @@ If A:
 1. Run `git rm -r .agents/skills/gstack/`
 2. Run `echo '.agents/skills/gstack/' >> .gitignore`
 3. Run `$GSTACK_BIN/gstack-team-init required` (or `optional`)
-4. Run `git add .claude/ .gitignore CLAUDE.md && git commit -m "chore: migrate gstack from vendored to team mode"`
+4. Run `git add .claude/ .gitignore AGENTS.md && git commit -m "chore: migrate gstack from vendored to team mode"`
 5. Tell the user: "Done. Each developer now runs: `cd $GSTACK_ROOT && ./setup --team`"
 
 If B: say "OK, you're on your own to keep the vendored copy up to date."
@@ -351,7 +357,7 @@ if [ -f "$_GBRAIN_CONFIG" ] && command -v gbrain >/dev/null 2>&1; then
     if [ -n "$_GBRAIN_PIN_PATH" ]; then
       echo "GBrain configured. Prefer \`gbrain search\`/\`gbrain query\` over Grep for"
       echo "semantic questions; use \`gbrain code-def\`/\`code-refs\`/\`code-callers\` for"
-      echo "symbol-aware code lookup. See \"## GBrain Search Guidance\" in CLAUDE.md."
+      echo "symbol-aware code lookup. See \"## GBrain Search Guidance\" in AGENTS.md."
       echo "Run /sync-gbrain to refresh."
     else
       echo "GBrain configured but this worktree isn't pinned yet. Run \`/sync-gbrain --full\`"
@@ -366,10 +372,13 @@ _BRAIN_SYNC_MODE=$("$_BRAIN_CONFIG_BIN" get artifacts_sync_mode 2>/dev/null || e
 # Detect remote-MCP mode (Path 4 of /setup-gbrain). Local artifacts sync is
 # a no-op in remote mode; the brain server pulls from GitHub/GitLab on its
 # own cadence. Read claude.json directly to keep this preamble fast (no
-# subprocess to claude CLI on every skill start).
+# subprocess to claude CLI on every skill start). Both registration scopes
+# are read (#2499): user scope, then the nearest-ancestor project scope.
 _GBRAIN_MCP_MODE="none"
+_GBRAIN_MCP_ENTRY=""
 if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude.json" ]; then
-  _GBRAIN_MCP_TYPE=$(jq -r '.mcpServers.gbrain.type // .mcpServers.gbrain.transport // empty' "$HOME/.claude.json" 2>/dev/null)
+  _GBRAIN_MCP_ENTRY=$(jq -c --arg cwd "$PWD" '((.projects // {}) | to_entries | map(select((.key as $k | $cwd == $k or ($cwd | startswith($k + "/")) or ($cwd | startswith($k + "\\"))) and ((try .value.mcpServers.gbrain catch null) != null))) | sort_by(.key | length) | last | .value.mcpServers.gbrain) // .mcpServers.gbrain // empty' "$HOME/.claude.json" 2>/dev/null)
+  _GBRAIN_MCP_TYPE=$(printf '%s' "$_GBRAIN_MCP_ENTRY" | jq -r '.type // .transport // empty' 2>/dev/null)
   case "$_GBRAIN_MCP_TYPE" in
     url|http|sse) _GBRAIN_MCP_MODE="remote-http" ;;
     stdio) _GBRAIN_MCP_MODE="local-stdio" ;;
@@ -390,6 +399,7 @@ if [ -d "$_GSTACK_HOME/.git" ] && [ "$_BRAIN_SYNC_MODE" != "off" ]; then
   _BRAIN_DO_PULL=1
   if [ -f "$_BRAIN_LAST_PULL_FILE" ]; then
     _BRAIN_LAST=$(cat "$_BRAIN_LAST_PULL_FILE" 2>/dev/null || echo 0)
+    case "$_BRAIN_LAST" in ''|*[!0-9]*) _BRAIN_LAST=0 ;; esac
     _BRAIN_AGE=$(( _BRAIN_NOW - _BRAIN_LAST ))
     [ "$_BRAIN_AGE" -lt 86400 ] && _BRAIN_DO_PULL=0
   fi
@@ -403,11 +413,15 @@ fi
 if [ "$_GBRAIN_MCP_MODE" = "remote-http" ]; then
   # Remote-MCP mode: local artifacts sync is a no-op (brain admin's server
   # pulls from GitHub/GitLab). Show the user this is by design, not broken.
-  _GBRAIN_HOST=$(jq -r '.mcpServers.gbrain.url // empty' "$HOME/.claude.json" 2>/dev/null | sed -E 's|^https?://([^/:]+).*|\1|')
+  _GBRAIN_HOST=$(printf '%s' "${_GBRAIN_MCP_ENTRY:-}" | jq -r '.url // empty' 2>/dev/null | sed -E 's|^https?://([^/:]+).*|\1|' | head -1 | tr -cd 'A-Za-z0-9._-')
   echo "ARTIFACTS_SYNC: remote-mode (managed by brain server ${_GBRAIN_HOST:-remote})"
 elif [ -d "$_GSTACK_HOME/.git" ] && [ "$_BRAIN_SYNC_MODE" != "off" ]; then
   _BRAIN_QUEUE_DEPTH=0
-  [ -f "$_GSTACK_HOME/.brain-queue.jsonl" ] && _BRAIN_QUEUE_DEPTH=$(wc -l < "$_GSTACK_HOME/.brain-queue.jsonl" | tr -d ' ')
+  # Spool-dir queue (one file per record); legacy .brain-queue.jsonl lines are
+  # counted too until the drain migrates them.
+  [ -d "$_GSTACK_HOME/.brain-queue.d" ] && _BRAIN_QUEUE_DEPTH=$(find "$_GSTACK_HOME/.brain-queue.d" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+  [ -f "$_GSTACK_HOME/.brain-queue.jsonl" ] && _BRAIN_QUEUE_DEPTH=$(( _BRAIN_QUEUE_DEPTH + $(wc -l < "$_GSTACK_HOME/.brain-queue.jsonl" | tr -d ' ') ))
+  [ -f "$_GSTACK_HOME/.brain-queue.jsonl.migrating" ] && _BRAIN_QUEUE_DEPTH=$(( _BRAIN_QUEUE_DEPTH + $(wc -l < "$_GSTACK_HOME/.brain-queue.jsonl.migrating" | tr -d ' ') ))
   _BRAIN_LAST_PUSH="never"
   [ -f "$_GSTACK_HOME/.brain-last-push" ] && _BRAIN_LAST_PUSH=$(cat "$_GSTACK_HOME/.brain-last-push" 2>/dev/null || echo never)
   echo "ARTIFACTS_SYNC: mode=$_BRAIN_SYNC_MODE | last_push=$_BRAIN_LAST_PUSH | queue=$_BRAIN_QUEUE_DEPTH"
@@ -445,23 +459,45 @@ At skill END before telemetry:
 ```
 
 
-## Model-Specific Behavioral Patch (claude)
+## Model-Specific Behavioral Patch (gpt)
 
-The following nudges are tuned for the claude model family. They are
+The following nudges are tuned for the gpt model family. They are
 **subordinate** to skill workflow, STOP points, AskUserQuestion gates, plan-mode
 safety, and /ship review gates. If a nudge below conflicts with skill instructions,
 the skill wins. Treat these as preferences, not rules.
 
-**Todo-list discipline.** When working through a multi-step plan, mark each task
-complete individually as you finish it. Do not batch-complete at the end. If a task
-turns out to be unnecessary, mark it skipped with a one-line reason.
+**Completion bias.** Do not end your turn with a partial solution when the full
+solution is reachable. If you encounter an error, debug it. If a test fails, fix it.
+If something is ambiguous, make your best judgment and proceed — don't stop and ask
+unless you're genuinely blocked.
 
-**Think before heavy actions.** For complex operations (refactors, migrations,
-non-trivial new features), briefly state your approach before executing. This lets
-the user course-correct cheaply instead of mid-flight.
+**Prefer doing over listing.** When you'd be tempted to write "you could also try X,
+Y, or Z," try the best option yourself. Pick, execute, report results.
 
-**Dedicated tools over Bash.** Prefer Read, Edit, Write, Glob, Grep over shell
-equivalents (cat, sed, find, grep). The dedicated tools are cheaper and clearer.
+**No preamble.** Skip "Great question!", "Let me help with that", and restating the
+user's request. Start with the work.
+
+**AskUserQuestion is NOT preamble.** The "No preamble" and "Prefer doing over listing"
+rules above do NOT apply to AskUserQuestion content. When you invoke AskUserQuestion,
+the user is about to make a decision — they need context, not terseness. Always emit
+the full format from the preamble's AskUserQuestion Format section:
+
+1. **Re-ground** (project + branch + task — 1-2 sentences).
+2. **Simplify (ELI10)** — explain what's happening in plain English a 16-year-old could
+   follow. Concrete stakes, not abstract tradeoffs. Non-negotiable; this is NOT preamble.
+3. **Recommend** — `RECOMMENDATION: Choose [X] because [one-line reason]` on its own
+   line. Never omit this line. Never collapse it into the options list.
+4. **Options** — lettered `A) B) C)` with Completeness scores (coverage-differentiated)
+   or the "options differ in kind" note (kind-differentiated).
+
+If you find yourself about to present an AskUserQuestion without the Simplify/ELI10
+paragraph, without a RECOMMENDATION line, or by just listing options and asking "which
+one?" — stop, back up, and emit the full format. The user will ask you to do it anyway,
+so do it the first time.
+
+**Reminder: subordination applies.** When a skill workflow says STOP, stop. When the
+skill asks via AskUserQuestion, that is the wait-for-user gate, not an ambiguity.
+Completion bias does not override safety gates.
 
 ## Voice
 
@@ -483,7 +519,13 @@ Escalate after 3 failed attempts, uncertain security-sensitive changes, or scope
 
 ## Operational Self-Improvement
 
-Before completing, if you discovered a durable project quirk or command fix that would save 5+ minutes next time, log it:
+Before completing, review the session for durable learnings and log each one —
+this step ALWAYS runs, it is not conditional on something feeling noteworthy
+(#2402: 43 of 44 learnings came from explicit /learn because "if you
+discovered" read as optional). A durable learning is a project quirk, command
+fix, pitfall, or pattern that would save 5+ minutes in a future session. If
+the review genuinely surfaces none, state "No durable learnings this session"
+in your completion summary — an explicit empty result, not a skipped step.
 
 ```bash
 $GSTACK_BIN/gstack-learnings-log '{"skill":"SKILL_NAME","type":"operational","key":"SHORT_KEY","insight":"DESCRIPTION","confidence":N,"source":"observed"}'
@@ -514,11 +556,15 @@ fi
 if [ "$_TEL" != "off" ] && [ -x $GSTACK_ROOT/bin/gstack-telemetry-log ]; then
   $GSTACK_ROOT/bin/gstack-telemetry-log \
     --skill "SKILL_NAME" --duration "$_TEL_DUR" --outcome "OUTCOME" \
-    --used-browse "USED_BROWSE" --session-id "$_SESSION_ID" 2>/dev/null &
+    --used-browse "USED_BROWSE" --session-id "$_SESSION_ID" \
+    --error-message "ERROR_MESSAGE" --failed-step "FAILED_STEP" 2>/dev/null &
 fi
 ```
 
 Replace `SKILL_NAME`, `OUTCOME`, and `USED_BROWSE` before running.
+Replace `ERROR_MESSAGE` with a short description of the error (if outcome is error,
+otherwise use empty string ""), and `FAILED_STEP` with the step name or number where
+the failure occurred (if outcome is error, otherwise use empty string "").
 
 ## Plan Status Footer
 
@@ -535,7 +581,7 @@ State persists between calls (cookies, tabs, login sessions).
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 B=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/.agents/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.agents/skills/gstack/browse/dist/browse"
-[ -z "$B" ] && B="$HOME$GSTACK_BROWSE/browse"
+[ -z "$B" ] && B="$GSTACK_BROWSE/browse"
 if [ -x "$B" ]; then
   echo "READY: $B"
 else
@@ -600,6 +646,18 @@ $B snapshot -i -a -o /tmp/annotated.png   # labeled screenshot
 $B screenshot /tmp/bug.png                # plain screenshot
 $B console                                # error log
 ```
+
+Two behaviors that silently invalidate screenshots (#2445 — designed, but
+surprising):
+- **`hover` scrolls its target into view.** Hovering anything below the fold
+  scrolls the page first, so a "rest state" shot taken afterwards captures
+  the wrong section with exit 0. Before a rest-state screenshot, hover only
+  something already visible, and assert position when it matters:
+  `$B js "window.scrollY"` should be `0` (or your intended offset).
+- **The tab persists across sessions.** The daemon keeps its tab between your
+  sessions, so `reload` or `screenshot` without a preceding `goto` can act on
+  whatever page earlier work left open. Start verification passes with an
+  explicit `$B goto <url>`, never a bare `reload`.
 
 ### 5. Find all clickable elements (including non-ARIA)
 ```bash
@@ -751,6 +809,28 @@ should route through `browse` — `screenshot --selector` for visual output,
 `load-html` + `js --out` for bytes a function returns — instead of
 `npm i puppeteer` and downloading a second Chromium that drifts out of version sync.
 One install to pin, one daemon's lifecycle to manage.
+
+## Session Persistence (opt-in)
+
+By default the headless daemon's cookies and tab state die with it — a crash,
+version auto-restart, or `browse stop` logs you out of everything (#778).
+Opt in to persistence with `BROWSE_PERSIST_STATE=1` in the daemon's
+environment: the daemon then snapshots cookies + per-tab
+URL/localStorage/sessionStorage to `<stateDir>/session-state.json` (0600)
+every 30 seconds and at clean shutdown, and restores it on the next launch.
+
+Facts that matter:
+- **Default OFF.** Cookies on disk are a real cost; the user opts in.
+- **Headless only.** Headed mode's persistent Chromium profile already owns
+  its state; replaying tabs would clobber the user's window.
+- **Never persisted:** loaded HTML and tab ownership — a tampered state file
+  cannot smuggle content past load-html's checks or forge ownership. Cookies
+  for localhost, `.internal`, and cloud-metadata addresses are dropped on
+  restore.
+- **Corrupt state** is moved to `session-state.json.corrupt` (kept for
+  diagnosis) and the daemon boots fresh — persistence can never block a
+  launch. The boot log says which happened: `Session state restored: N
+  cookies / M tabs` or `fresh session`.
 
 ## User Handoff
 
