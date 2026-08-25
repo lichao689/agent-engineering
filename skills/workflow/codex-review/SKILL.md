@@ -1,20 +1,20 @@
 ---
 name: codex-review
 description: >
-  用本机 OpenAI Codex CLI 的原生审核器审查当前改动（uncommitted、相对 base 分支、指定 commit、或点名路径）。
-  Use when the user asks for Codex review, /codex-review, /codex:review, 让 Codex 审代码,
-  跨模型第二意见, adversarial review, or a second opinion on the working tree / branch / commit.
-  Do not use Grok's built-in /review for these requests.
-argument-hint: "[--uncommitted | --base <ref> | --commit <sha>] [--adversarial] [paths|focus]"
+  Native Codex CLI reviewer (`codex exec review`) for uncommitted changes, a
+  base-branch diff, a named commit, or an allowlist of paths. Triggers:
+  /codex-review, /codex:review, Codex review, 让 Codex 审代码, adversarial
+  review, second opinion on the working tree or a commit.
+argument-hint: "[--uncommitted | --base <ref> | --commit <sha>] [--adversarial] [paths]"
 ---
 
 # Codex Review
 
-把改动交给本机 Codex 的**原生审核器**（`codex exec review`），不是 Grok `/review`，也不是 `codex exec "请 review 这段代码"`。
+把改动交给本机 Codex 的**原生审核器**（启动器里的 `codex exec review`）。
 
-只读。默认不改文件、不进入 review→fix 循环。用户明确要求按 findings 修时才修。
+**allowlist** 是报告契约，不是 Codex 的输入范围：`--uncommitted` 始终把整棵脏树交给审核器；有 allowlist 时只展示、只修改命中路径的 findings。脏树大于 allowlist 时，范围外误报是预期输出。
 
-Windows 调用**必须**走启动器 `$env:USERPROFILE\.agents\skills\codex-cli-windows.ps1`（仓库源文件 `scripts/codex-cli-windows.ps1`）。不要手写 `codex exec`、不要 PowerShell `< NUL`、不要 `Start-Process -ArgumentList` 传带空格的 PROMPT。
+默认停在回报。用户写了修 / 按意见改 / 提交，才进入第 6 步。
 
 ## 1. 前置检查
 
@@ -23,86 +23,94 @@ Get-Command codex -ErrorAction SilentlyContinue
 codex --version
 ```
 
-缺失或未登录：原样报告错误，提示 `codex login`，**停止**。不要改用 Grok `/review` 顶替。
+缺失或未登录：原样报告错误，提示 `codex login`，停止。
 
 完成：已打印版本，或已停止并报告缺失。
 
-## 2. 解析范围
+## 2. 范围
 
-从用户输入取出（`--uncommitted` / `--base` / `--commit` 三者互斥）：
+从用户输入取出唯一 git 范围（三者互斥）：
 
-| 输入 | 范围 |
+| 输入 | git 范围 |
 |---|---|
 | `--uncommitted` | staged + unstaged + untracked（整棵脏树） |
 | `--base <ref>` | 相对该 base 的分支 diff |
 | `--commit <sha>` | 该 commit 引入的改动 |
-| 点名路径、「本对话改的代码」、本任务拥有文件 | git 范围仍按下面自动目标；另建 **FOCUS_PATHS** allowlist |
-| `--adversarial` 或剩余焦点文本 | 写入 PROMPT 文件，不是 argv |
-| `--model` / `--effort` | 透传到脚本；用户没说则用 Codex 默认 |
 
-自动目标（用户没给三者之一时）：
+点名路径、「本对话改的代码」、本任务拥有文件 → 另建 **allowlist**。`--adversarial` 与剩余焦点写入 PROMPT 文件。`--model` / `--effort` 仅在用户指定时传给启动器。
+
+用户没给三者之一时：
 
 ```powershell
 git status --porcelain
 ```
 
-1. 用户给了 FOCUS_PATHS → git 范围用 `--uncommitted`（工作区脏）或 `--base <default>`（干净但在功能分支）；审查后**只向用户展示命中 FOCUS_PATHS 的 findings**。
-2. 工作区脏、没有 FOCUS_PATHS、且 porcelain 行数 **> 8** → **先问**审整棵脏树还是列出文件。停到用户回答。不要调用 Codex。
-3. 工作区脏、porcelain ≤ 8 → `--uncommitted`。
+1. 有 allowlist → 脏则 `--uncommitted`，干净且在功能分支则 `--base <default>`。
+2. 脏、无 allowlist、porcelain **> 8** → 先问审整棵脏树还是列出文件；停到用户回答。
+3. 脏、porcelain ≤ 8 → `--uncommitted`。
 4. 干净且不在默认分支（`origin/main`，否则 `origin/master`，否则本地 `main`/`master`）→ `--base <default>`。
-5. 已在默认分支且干净 → 打印「没有可审的改动」，不要调用 Codex，不要用 `HEAD~N` 凑目标。
+5. 已在默认分支且干净 → 打印「没有可审的改动」，停止。
 
-完成：已确定唯一 git 范围，以及可选的 FOCUS_PATHS。
+完成：唯一 git 范围，以及可选的 allowlist 路径列表。
 
 ## 3. 调用
 
-把对抗焦点和 FOCUS_PATHS 写成 **UTF-8 无 BOM** 的 PROMPT 文件。不要把 diff 嵌进 PROMPT。原生审核器自己看 git。
+对抗焦点和 allowlist 写成 **UTF-8 无 BOM** 的 PROMPT 文件。原生审核器自己看 git，PROMPT 里不嵌 diff。
 
-对抗式开头（可再追加用户焦点）：
+对抗式开头：
 
 ```
 Challenge the implementation and design. Only report issues that would change a merge decision. Prioritize expensive attack surfaces: correctness, data loss, rollback, races, auth.
 ```
 
-有 FOCUS_PATHS 时追加：只审这些路径；其他脏文件忽略。
+有 allowlist 时追加路径列表，并写明：这是报告 allowlist；审核器仍会看到当前 git 范围里的全部改动。
 
 ```powershell
 $script = Join-Path $env:USERPROFILE ".agents\skills\codex-cli-windows.ps1"
 $out = Join-Path $env:TEMP ("codex-review-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".md")
 $err = "$out.err.log"
-# 按范围选 -Uncommitted 或 -Base 或 -Commit；有 PROMPT 文件才传 -PromptFile
 & $script -Mode review -OutPath $out -ErrPath $err -WorkingDirectory (Get-Location).Path -Uncommitted -PromptFile $promptFile
 ```
 
-约束：
+（按第 2 步改 `-Uncommitted` / `-Base` / `-Commit`。有 PROMPT 才传 `-PromptFile`。用户指定了模型或 effort 再加 `-Model` / `-Effort`。）
 
-- 只通过该脚本调用。脚本在 0.149.x 等把 scope 与 PROMPT 判成互斥时，会**自动丢掉 PROMPT 再跑一次**；此时必须按 FOCUS_PATHS 过滤 findings，并在回报里写明发生了降级。
-- 只读：脚本已固定 `sandbox_mode="read-only"` 与 `--ephemeral`。不要 `--full-auto`、不要 yolo、不要 `--json`、不要 `--last`。
-- 审查正文只读 `$out`。
-- 用户指定模型才加 `-Model`；effort 才加 `-Effort`。
-- 顶层 `codex review` 不能带 `-m`，不要默认走它。脚本已失败且 stderr 表明二进制不认识 `exec review` 时，才允许再试一次同范围的顶层 `codex review`。仍失败则停。不要退回 `codex exec "Review this diff"`。
+同一轮还要用 findings → 等到进程退出且 `$out` 落盘。只要审查结果 → 后台跑，结束本回合，等完成通知再读 `$out`。
 
-等待：
+启动器已处理一次 scope+PROMPT 互斥降级。调用已启动（已有 `$out` 或 Codex session）则沿用该次输出。脚本失败且 stderr 表明二进制不认识 `exec review` 时，才允许同范围再试一次顶层 `codex review`。
 
-- 同一轮还要用 findings（提交、按意见修、继续实现）→ **等到进程结束**。`block_until_ms` ≥ `min(20, 10 + 0.5 * porcelain行数)` 分钟。
-- 本轮只要审查结果 → 后台跑，结束当前回合，等完成通知后再读 `$out`。
+完成：进程已结束或已后台交出，且知道 `$out` / `$err` 路径。
 
-**调用错误**（stdin/参数/互斥 flag、脚本抛「CLI missing」）：按脚本的一次降级处理；不要换配方连打。  
-**审查已启动**（已有 `$out` 或 Codex session 已开始）：禁止重试。
+## 4. 过滤
 
-完成：进程已结束（或已后台交出去），且知道 `$out` / `$err` 路径。
+**findings 只读 `$out`。** `$err` 是遥测（websocket、skill 全文、git dump）；不把它当审查正文，不对整份 `$err` 做 `Select-String ERROR`。
 
-## 4. 回报
+退出码非零且 `$out` 不存在：只取 `$err` 里**最后一条**以 `error:` 开头的行。
 
-读 `$out` 作为 findings。
+对 `$out` 里每一条 finding 分类：
 
-退出码非零且 `$out` 不存在：只取 `$err` 里**最后一条**以 `error:` 开头的行（忽略 websocket、skill 全文、git dump）。不要对整份 `$err` 做 `Select-String ERROR`。
+- **范围内**：路径落在 allowlist 内（无 allowlist 则全部范围内）
+- **范围外**：有 allowlist 且路径未命中
 
-向用户输出：
+降级（回报里声明）：`$err` 含 `dropped PROMPT`，或存在范围外 finding。
 
-1. 目标（uncommitted / base / commit）、FOCUS_PATHS、是否发生 scope+PROMPT 降级、实际调用（脚本参数即可）
-2. Codex 原文 findings（可轻度整理，不丢文件:行）。有 FOCUS_PATHS 时只列命中 allowlist 的条目；若降级后原文全是范围外文件，写明「范围内无 findings」
-3. 你的判断：采纳 / 不适用（简短理由）。Findings 是输入，不是裁决
-4. 不要默默按 review 改代码。用户说「按 Codex 的意见修」再修
+完成：每条 finding 已标范围内或范围外。
 
-事后删除 `$out`、`$err`、PROMPT 文件。
+## 5. 回报
+
+1. git 范围、allowlist、是否降级、启动器参数
+2. 范围内 findings（轻度整理，保留文件:行）。范围内为空 → 「范围内无 findings」
+3. 对每条范围内 finding：采纳 / 不适用（简短理由）。Findings 是输入，不是裁决
+
+用户未要求修改则停在这里。事后删除 `$out`、`$err`、PROMPT 文件。
+
+完成：三条都已写出；范围内每条都有判断。
+
+## 6. 修改与提交
+
+仅当用户要求按 findings 修改（或修改后提交）时进入。
+
+1. 只改范围内且判断为**采纳**的项。
+2. 用 `task test:related -- <allowlist 与为修复新增的文件>` 验证。
+3. 若还要求提交：`git add` 只含 allowlist 及为这些修复新建的文件；commit 按仓库 Git 规则。
+
+完成：采纳项已改；相关测试通过；若提交，已提交文件不超出 allowlist 与对应新文件。

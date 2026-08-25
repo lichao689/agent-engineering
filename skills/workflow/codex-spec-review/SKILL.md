@@ -1,45 +1,48 @@
 ---
 name: codex-spec-review
-description: >
-  用本机 Codex CLI 只读审查 grill 之后写出的实施计划、spec 或 tickets（不是代码 diff）。
-  Use when the user asks Codex to review a plan, implementation plan, spec, tickets, PRD,
-  实施计划, grill 之后的计划/规格/工单, /codex-spec-review, or a second opinion on those docs.
-  Do not use /codex-review (native git reviewer) or Grok /review for this.
+description: Grill 之后用本机 Codex 只读审查实施计划、spec 或 tickets。
 argument-hint: "[path] [--plan | --spec | --tickets]"
 disable-model-invocation: true
 ---
 
-# Codex Plan / Spec / Tickets Review
+# Codex Spec Review
 
-Grill 由 Grok 主持，写出的计划/spec/tickets 也是 Grok。Codex 没参加过那轮决策，适合当第二意见。
-**不要自动跑。** 用户点名审这份文档才调用。文档经常只是一份实施计划，不必先有 spec 或 tickets。
+Grill 由主持模型写出的计划 / spec / tickets，交给没参加过那轮决策的 Codex 做第二意见。用户点名要审的文档才调用。
 
-这不是 `codex exec review`。那条命令审 git diff。这里审文档，用只读 `codex exec`，PROMPT 从文件进 stdin。
+这是只读 `codex exec`（PROMPT 从文件进 stdin），不是 `codex exec review`。**allowlist** 是送进 PROMPT 的仓库相对路径：Codex 仍可能读仓库里其它文件；展示和后续修改只针对 allowlist 上的文档。
 
-Windows 调用**必须**走启动器 `$env:USERPROFILE\.agents\skills\codex-cli-windows.ps1`（仓库源文件 `scripts/codex-cli-windows.ps1`）。不要手写 `codex exec $PROMPT`、不要 PowerShell `< NUL`（本模式需要 stdin 读 PROMPT 文件）。
+默认停在回报。用户写了按意见改，才进入第 6 步。
 
-## 1. 解析目标
+## 1. 前置检查
 
-用户给了路径就用路径。否则：
+```powershell
+Get-Command codex -ErrorAction SilentlyContinue
+codex --version
+```
 
-1. 本轮刚写出的计划 / spec / `.scratch/<feature>/issues/` 优先（Grok plan mode 的 `plan.md` 也算）
-2. 否则问用户要路径，不要猜整个仓库
+缺失或未登录：原样报告错误，提示 `codex login`，停止。
 
-用户 `--plan` / `--spec` / `--tickets` 优先。否则：
+完成：已打印版本，或已停止并报告缺失。
 
-- 文件名含 `spec`/`prd` → **spec**
+## 2. 目标
+
+用户给了路径就用路径。否则本轮刚写出的计划 / spec / `.scratch/<feature>/issues/` 优先（含 plan mode 的 `plan.md`）；再否则问路径。
+
+审查类型：用户 `--plan` / `--spec` / `--tickets` 优先。否则：
+
+- 文件名含 `spec` / `prd` → **spec**
 - 目录、`.scratch/*/issues/`、或多个 `NN-*.md` → **tickets**
 - 文件名含 `plan`、实施计划、或一份未标明类型的单文档 → **plan**
-- 同一 feature 下 plan + spec、spec + tickets、或三者都在 → **一次审完**，PROMPT 里列出全部仓库相对路径
-- `.scratch/<feature>/` 同时有 `plan.md`、spec、`issues/` 且用户没收窄 → 全部列入，不要只送其中一份
+- 同一 feature 下 plan + spec、spec + tickets、或三者都在 → **一次审完**
+- `.scratch/<feature>/` 同时有 `plan.md`、spec、`issues/` 且用户没收窄 → 全部列入
 
-把 grill 里已经拍板的决策写成最多 15 条「Settled decisions」放进 PROMPT。没有就写「none; treat the documents as source of truth」。不要把整段 grill 对话贴给 Codex。不要把文档正文嵌进 PROMPT；只给路径，让 Codex 自己读。
+这些路径就是 **allowlist**。把 grill 里已拍板的决策写成最多 15 条「Settled decisions」。没有则写 `none; treat the documents as source of truth`。PROMPT 只给路径和这条摘要，让 Codex 自己读文件。
 
-完成：已有路径列表、审查类型、Settled decisions 摘要。
+完成：allowlist、审查类型、Settled decisions 摘要。
 
-## 2. 调用
+## 3. 调用
 
-把下面模板写成 **UTF-8 无 BOM** 的 PROMPT 文件（路径用仓库相对路径，一行一个）：
+把下面模板写成 **UTF-8 无 BOM** 的 PROMPT 文件（路径一行一个）：
 
 ```
 You are an independent reviewer. You did not write these documents and did not run the grilling session.
@@ -56,7 +59,6 @@ Review as:
 - tickets: not a vertical slice, missing/wrong blockers, too big for one context window, acceptance criteria that cannot be proven, tickets that smuggle design the spec never made
 
 Only report findings that would change whether we should implement this as written.
-Do not suggest rewriting tone or adding speculative features.
 
 Return:
 
@@ -73,30 +75,47 @@ SUMMARY
 ```
 
 ```powershell
-Get-Command codex -ErrorAction SilentlyContinue
-if (-not $?) { throw "codex CLI missing; run codex login after install" }
-
 $script = Join-Path $env:USERPROFILE ".agents\skills\codex-cli-windows.ps1"
 $out = Join-Path $env:TEMP ("codex-spec-review-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".md")
 $err = "$out.err.log"
 & $script -Mode exec -OutPath $out -ErrPath $err -WorkingDirectory (Get-Location).Path -PromptFile $promptFile
 ```
 
-- 用户指定模型/effort 才加 `-Model` / `-Effort`
-- 不要 `--json`、不要 yolo、不要 `codex exec review`
-- 缺失 CLI 或未登录：原样报错并停。不要改用 Grok 自己审
+用户指定了模型或 effort 再加 `-Model` / `-Effort`。
 
-等待：同一轮还要用 findings（按意见改文档）→ 等到进程结束，`block_until_ms` ≥ 10 分钟。只要审查结果 → 后台跑并结束当前回合。
+同一轮还要用 findings → 等到进程退出且 `$out` 落盘。只要审查结果 → 后台跑，结束本回合，等完成通知再读 `$out`。
 
-**调用错误**（脚本找不到 exe、PROMPT 文件为空）：修调用后再跑一次。  
-**审查已启动**：禁止重试。
+PROMPT 文件为空或启动器找不到 exe：修好后再跑一次。审查已启动（已有 `$out` 或 Codex session）则沿用该次输出。
 
 完成：进程已结束或已后台交出，且知道 `$out` / `$err` 路径。
 
-## 3. 回报
+## 4. 过滤
 
-读 `$out` 作为 findings。退出码非零且 `$out` 不存在：只取 `$err` 里最后一条 `error:` 行，不要全文搜 `ERROR`。
+**findings 只读 `$out`。** `$err` 是遥测；不对整份 `$err` 做 `Select-String ERROR`。
 
-给用户：Codex 原文 findings + 你的采纳/驳回（短理由）。不要默默改文档。用户说按意见改再改。
+退出码非零且 `$out` 不存在：只取 `$err` 里**最后一条**以 `error:` 开头的行。
 
-删掉 `$out`、`$err`、PROMPT 文件。
+对 `$out` 里每一条 finding 分类：
+
+- **范围内**：指向 allowlist 中的文档，或明确写那份文档的缺口 / 矛盾
+- **范围外**：只指控 allowlist 外的文件，且不回指目标文档
+
+降级（回报里声明）：存在范围外 finding。
+
+完成：每条 finding 已标范围内或范围外。
+
+## 5. 回报
+
+1. allowlist、审查类型、启动器参数、是否降级
+2. 范围内 BLOCKERS / GAPS / SUMMARY（保留 path）。范围内为空 → 「范围内无 findings」
+3. 对每条范围内 finding：采纳 / 不适用（简短理由）。Findings 是输入，不是裁决
+
+用户未要求改文档则停在这里。事后删除 `$out`、`$err`、PROMPT 文件。
+
+完成：三条都已写出；范围内每条都有判断。
+
+## 6. 修改
+
+仅当用户要求按 findings 改文档时进入。只改 allowlist 上、且判断为**采纳**的文件。文档-only 跑 `git diff --check`。
+
+完成：采纳项已改；若有文档 diff，空白检查通过。
