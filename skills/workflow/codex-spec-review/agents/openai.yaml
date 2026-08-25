@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Spec Review"
+  short_description: "Read-only Codex review of plans, specs, or tickets"
+  default_prompt: "Use $codex-spec-review to have Codex review the current plan, spec, or tickets."

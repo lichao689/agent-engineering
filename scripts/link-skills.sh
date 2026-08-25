@@ -3,23 +3,20 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/link-skills.sh [--target codex|claude|all] [--dest PATH] [--strategy copy|link] [--with-gstack]
+Usage: scripts/link-skills.sh [--target agents|codex|claude|all] [--dest PATH] [--strategy copy|link]
 
 Options:
-  --target   Agent skill directory to install into. Default: codex.
+  --target   Agent skill directory to install into. Default: agents.
   --dest     Explicit destination directory. Cannot be combined with --target all.
-  --strategy Install strategy. Default: copy for Codex, link for Claude.
-  --with-gstack
-             Also install the curated gstack subset and locked runtime.
+  --strategy Install strategy. Default: copy for agents/Codex, link for Claude.
   -h,--help  Show this help text.
 USAGE
 }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-TARGET="codex"
+TARGET="agents"
 DEST=""
 STRATEGY=""
-WITH_GSTACK=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -34,10 +31,6 @@ while [ "$#" -gt 0 ]; do
     --strategy)
       STRATEGY="${2:-}"
       shift 2
-      ;;
-    --with-gstack)
-      WITH_GSTACK=1
-      shift
       ;;
     -h|--help)
       usage
@@ -57,6 +50,7 @@ resolve_path() {
 
 dest_for_target() {
   case "$1" in
+    agents) echo "$HOME/.agents/skills" ;;
     codex) echo "$HOME/.codex/skills" ;;
     claude) echo "$HOME/.claude/skills" ;;
     *)
@@ -125,7 +119,7 @@ install_into_dest() {
 
 default_strategy_for_target() {
   case "$1" in
-    codex) echo "copy" ;;
+    agents|codex) echo "copy" ;;
     claude) echo "link" ;;
     *)
       echo "error: unsupported target: $1" >&2
@@ -141,10 +135,11 @@ fi
 
 case "$TARGET" in
   all)
+    install_into_dest "$(dest_for_target agents)" "${STRATEGY:-$(default_strategy_for_target agents)}"
     install_into_dest "$(dest_for_target codex)" "${STRATEGY:-$(default_strategy_for_target codex)}"
     install_into_dest "$(dest_for_target claude)" "${STRATEGY:-$(default_strategy_for_target claude)}"
     ;;
-  codex|claude)
+  agents|codex|claude)
     install_into_dest "${DEST:-$(dest_for_target "$TARGET")}" "${STRATEGY:-$(default_strategy_for_target "$TARGET")}"
     ;;
   *)
@@ -153,19 +148,3 @@ case "$TARGET" in
     exit 1
     ;;
 esac
-
-if [ "$WITH_GSTACK" -eq 1 ]; then
-  case "$TARGET" in
-    codex)
-      CODEX_SKILLS_DIR="${DEST:-$(dest_for_target codex)}" \
-        "$REPO/scripts/setup-gstack-subset.sh" --target codex
-      ;;
-    claude)
-      CLAUDE_SKILLS_DIR="${DEST:-$(dest_for_target claude)}" \
-        "$REPO/scripts/setup-gstack-subset.sh" --target claude
-      ;;
-    all)
-      "$REPO/scripts/setup-gstack-subset.sh" --target all
-      ;;
-  esac
-fi

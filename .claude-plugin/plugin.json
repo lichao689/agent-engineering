@@ -2,6 +2,7 @@
   "name": "lichao689-skills",
   "skills": [
     "./skills/workflow/solo-ship",
+    "./skills/workflow/codex-spec-review",
     "./skills/workflow/code-simplifier",
     "./skills/workflow/rules-curator",
     "./skills/setup"
