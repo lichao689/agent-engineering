@@ -31,6 +31,7 @@ cd ~/Developer/lichao689-skills
 - [`setup`](./skills/setup/SKILL.md)：安装、检查和修复这个技能包在 `~/.agents/skills`、Codex 与 Claude Code 中的配置。
 - [`autoreview`](./skills/external/autoreview/SKILL.md)：来自 [`openclaw/agent-skills`](https://github.com/openclaw/agent-skills/tree/main/skills/autoreview) 的提交前结构化代码审查技能。
 - [`browser-harness`](./skills/external/browser-harness/SKILL.md)：来自 [`browser-use/browser-harness`](https://github.com/browser-use/browser-harness) 的浏览器自动化技能，通过 CDP 直接控制本地 Chrome。快照只包含技能文档；使用前需一次性安装 `browser-harness` CLI（见上游 [install.md](https://github.com/browser-use/browser-harness/blob/main/install.md)）。
+- [`mattpocock`](./skills/external/mattpocock/README.md)：来自 [`mattpocock/skills`](https://github.com/mattpocock/skills)（"Skills for Real Engineers"）的完整镜像，含 engineering / productivity / in-progress / misc 四类共 37 个技能，按上游提交 `6654f6b`（2026-08-24）同步。
 
 ## 脚本
 
